@@ -3,6 +3,12 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"os/exec"
+	"os/user"
+	"path"
+	"strconv"
+	"strings"
+
 	"github.com/1Panel-dev/1Panel/backend/app/dto/request"
 	"github.com/1Panel-dev/1Panel/backend/app/dto/response"
 	"github.com/1Panel-dev/1Panel/backend/buserr"
@@ -14,11 +20,6 @@ import (
 	"github.com/1Panel-dev/1Panel/backend/utils/systemctl"
 	"github.com/pkg/errors"
 	"gopkg.in/ini.v1"
-	"os/exec"
-	"os/user"
-	"path"
-	"strconv"
-	"strings"
 )
 
 type HostToolService struct{}
@@ -191,7 +192,7 @@ func (h *HostToolService) CreateToolConfig(req request.HostToolCreate) error {
 				return err
 			}
 		}
-		if err = systemctl.Restart(req.ServiceName); err != nil {
+		if err = systemctl.ServiceRestart(req.ServiceName); err != nil {
 			global.LOG.Errorf("[init] restart %s failed err %s", req.ServiceName, err.Error())
 			return err
 		}
@@ -249,7 +250,7 @@ func (h *HostToolService) OperateToolConfig(req request.HostToolConfig) (*respon
 		if err = fileOp.WriteFile(configPath, strings.NewReader(req.Content), fileInfo.Mode()); err != nil {
 			return nil, err
 		}
-		if err = systemctl.Restart(serviceName); err != nil {
+		if err = systemctl.ServiceRestart(serviceName); err != nil {
 			_ = fileOp.WriteFile(configPath, bytes.NewReader(oldContent), fileInfo.Mode())
 			return nil, err
 		}
