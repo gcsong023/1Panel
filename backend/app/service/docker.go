@@ -15,7 +15,6 @@ import (
 	"github.com/1Panel-dev/1Panel/backend/utils/cmd"
 	"github.com/1Panel-dev/1Panel/backend/utils/docker"
 	"github.com/1Panel-dev/1Panel/backend/utils/systemctl"
-	"github.com/pkg/errors"
 )
 
 type DockerService struct{}
@@ -364,20 +363,47 @@ func (u *DockerService) UpdateConfByFile(req dto.DaemonJsonUpdateByFile) error {
 }
 
 func (u *DockerService) OperateDocker(req dto.DockerOperation) error {
-	service := "docker"
+	const (
+		validOperations = "start|stop|restart"
+		serviceName     = "docker"
+		dockerdService  = serviceName + "d"
+	)
+
+	if !strings.Contains(validOperations, req.Operation) {
+		return fmt.Errorf("invalid operation, valid operations: %s", req.Operation)
+	}
+
 	sudo := cmd.SudoHandleCmd()
 	dockerCmd, err := getDockerRestartCommand()
 	if err != nil {
 		return err
 	}
+	handleCmdError := func(cmdStr string, std string, err error) error {
+		if err != nil {
+			global.LOG.Errorf("command [%s] failed: %v, output: %s", cmdStr, err, std)
+			return fmt.Errorf("%s failed: %v", cmdStr, err)
+		}
+		return nil
+	}
+
 	if req.Operation == "stop" {
-		isSocketActive, _ := systemctl.IsActive("docker.socket")
-		if isSocketActive {
-			std, err := cmd.Execf("%s systemctl stop docker.socket", sudo)
-			if err != nil {
-				global.LOG.Errorf("handle systemctl stop docker.socket failed, err: %v", std)
+		if isActive, _ := systemctl.IsActive("docker.socket"); isActive {
+			if std, err := cmd.Execf("%s systemctl stop docker.socket", sudo); err != nil {
+				return handleCmdError("stop docker.socket", std, err)
 			}
 		}
+	}
+
+	execCommand := func(baseCmd, operation string) error {
+		var cmdStr string
+		switch baseCmd {
+		case "rc-service", "service":
+			cmdStr = fmt.Sprintf("%s %s %s", baseCmd, dockerdService, operation)
+		default:
+			cmdStr = fmt.Sprintf("%s %s %s", baseCmd, operation, serviceName)
+		}
+		std, err := cmd.Execf(cmdStr)
+		return handleCmdError(cmdStr, std, err)
 	}
 
 	if req.Operation == "restart" {
@@ -386,11 +412,7 @@ func (u *DockerService) OperateDocker(req dto.DockerOperation) error {
 		}
 	}
 
-	stdout, err := cmd.Execf("%s %s %s", dockerCmd, req.Operation, service)
-	if err != nil {
-		return errors.New(stdout)
-	}
-	return nil
+	return execCommand(dockerCmd, req.Operation)
 }
 
 func changeLogOption(daemonMap map[string]interface{}, logMaxFile, logMaxSize string) {
@@ -451,7 +473,7 @@ func validateDockerConfig() error {
 		return nil
 	}
 	if err != nil || (stdout != "" && strings.TrimSpace(stdout) != "configuration OK") {
-		return fmt.Errorf("Docker configuration validation failed, err: %v", stdout)
+		return fmt.Errorf("docker configuration validation failed, err: %v", stdout)
 	}
 	return nil
 }
@@ -465,6 +487,9 @@ func getDockerRestartCommand() (string, error) {
 	if strings.Contains(dockerPath, "snap") {
 		return "snap", nil
 	}
+	if systemctl.ServiceCmd != "" {
+		return systemctl.ServiceCmd, nil
+	}
 	return "systemctl", nil
 }
 
@@ -473,9 +498,27 @@ func restartDocker() error {
 	if err != nil {
 		return err
 	}
-	stdout, err := cmd.Execf("%s restart docker", restartCmd)
-	if err != nil {
-		return fmt.Errorf("failed to restart Docker: %s", stdout)
+	switch restartCmd {
+	case "snap":
+		stdout, err := cmd.Exec("snap restart docker")
+		if err != nil {
+			return fmt.Errorf("failed to restart Docker: %s", stdout)
+		}
+	case "systemctl":
+		stdout, err := cmd.Exec("systemctl restart docker.socket")
+		if err != nil {
+			return fmt.Errorf("failed to restart Docker: %s", stdout)
+		}
+	case "rc-service":
+		stdout, err := cmd.Exec("rc-service dockerd restart")
+		if err != nil {
+			return fmt.Errorf("failed to restart Docker: %s", stdout)
+		}
+	case "service":
+		stdout, err := cmd.Exec("service dockerd restart")
+		if err != nil {
+			return fmt.Errorf("failed to restart Docker: %s", stdout)
+		}
 	}
 	return nil
 }
