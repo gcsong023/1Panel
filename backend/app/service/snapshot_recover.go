@@ -24,6 +24,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 		global.Cron.Start()
 	}()
 
+	serviceName, serviceFile, serviceDir := cmd.DetectServiceConfig()
 	snapFileDir := ""
 	if isRecover {
 		baseDir := path.Join(global.CONF.System.TmpDir, fmt.Sprintf("system/%s", snap.Name))
@@ -109,9 +110,15 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 		req.IsNew = true
 	}
 	if req.IsNew || snap.InterruptStep == "1PanelService" {
-		if err := recoverPanel(path.Join(snapFileDir, "1panel/1panel.service"), "/etc/systemd/system"); err != nil {
+		srcServiceFile := path.Join(snapFileDir, "1panel/1panel.service")
+		if err := recoverPanel(srcServiceFile, serviceDir); err != nil {
 			updateRecoverStatus(snap.ID, isRecover, "1PanelService", constant.StatusFailed, err.Error())
 			return
+		}
+		if serviceFile != "1panel.service" {
+			targetPath := path.Join(serviceDir, serviceFile)
+			_ = os.Rename(path.Join(serviceDir, "1panel.service"), targetPath)
+			_ = os.Chmod(targetPath, 0755)
 		}
 		global.LOG.Debug("recover 1panel service from snapshot file successful!")
 		req.IsNew = true
@@ -147,7 +154,7 @@ func (u *SnapshotService) HandleSnapshotRecover(snap model.Snapshot, isRecover b
 		global.LOG.Debugf("remove the file %s after the operation is successful", path.Dir(snapFileDir))
 		_ = os.RemoveAll(path.Dir(snapFileDir))
 	}
-	_, _ = cmd.Exec("systemctl daemon-reload && systemctl restart 1panel.service")
+	cmd.Restart1PanelService(serviceName)
 }
 
 func backupBeforeRecover(snap model.Snapshot) error {
