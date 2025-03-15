@@ -514,7 +514,7 @@ func (c *ClamService) UpdateFile(req dto.UpdateByNameAndFile) error {
 	_, _ = write.WriteString(req.File)
 	write.Flush()
 
-	_ = systemctl.Restart(service)
+	_ = systemctl.ServiceRestart(service)
 	return nil
 }
 
