@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -99,14 +100,23 @@ func (u *ImageRepoService) Create(req dto.ImageRepoCreate) error {
 		defer ticker.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 		if err := func() error {
+			var serviceCmd string
+			if _, err := exec.LookPath("systemctl"); err == nil {
+				serviceCmd = "systemctl is-active docker"
+			} else if _, err := exec.LookPath("rc-service"); err == nil {
+				serviceCmd = "rc-service dockerd status"
+			} else {
+				serviceCmd = "service dockerd status"
+			}
+
 			for range ticker.C {
 				select {
 				case <-ctx.Done():
 					cancel()
 					return errors.New("the docker service cannot be restarted")
 				default:
-					stdout, err := cmd.Exec("systemctl is-active docker")
-					if string(stdout) == "active\n" && err == nil {
+					_, err := cmd.Exec(serviceCmd) //若命令执行成功（退出码为0），则认为Docker服务已成功重启.
+					if err == nil {
 						global.LOG.Info("docker restart with new conf successful!")
 						return nil
 					}
