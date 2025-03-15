@@ -52,7 +52,8 @@ func snapPanel(snap snapHelper, targetDir string) {
 	}
 	_, _ = cmd.Execf("cp -r /usr/local/bin/lang %s", targetDir)
 
-	if err := common.CopyFile("/etc/systemd/system/1panel.service", targetDir); err != nil {
+	serviceName, _, serviceDir := cmd.DetectServiceConfig()
+	if err := common.CopyFile(path.Join(serviceDir, serviceName), targetDir); err != nil {
 		status = err.Error()
 	}
 	snap.Status.Panel = status
