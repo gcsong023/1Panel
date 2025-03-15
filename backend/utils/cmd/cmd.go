@@ -13,6 +13,7 @@ import (
 
 	"github.com/1Panel-dev/1Panel/backend/buserr"
 	"github.com/1Panel-dev/1Panel/backend/constant"
+	"github.com/1Panel-dev/1Panel/backend/utils/systemctl"
 )
 
 func Exec(cmdStr string) (string, error) {
@@ -226,4 +227,32 @@ func ExecShellWithTimeOut(cmdStr, workdir string, logger *log.Logger, timeout ti
 		return buserr.New(constant.ErrCmdTimeout)
 	}
 	return err
+}
+
+func DetectServiceConfig() (string, string, string) {
+	switch systemctl.ServiceCmd {
+	case "systemctl":
+		return "1panel.service", "1panel.service", "/etc/systemd/system"
+	case "rc-service":
+		return "1paneld", "1paneld", "/etc/init.d"
+	default:
+		return "1paneld", "1paneld", "/etc/init.d"
+	}
+}
+
+func Restart1PanelService(serviceName string) {
+	var reloadCmd, restartCmd string
+	if strings.HasSuffix(serviceName, ".service") {
+		reloadCmd = "systemctl daemon-reload"
+		restartCmd = fmt.Sprintf("systemctl restart %s", serviceName)
+	} else if _, err := exec.LookPath("rc-service"); err == nil {
+		restartCmd = fmt.Sprintf("rc-service %s restart", serviceName)
+	} else {
+		restartCmd = fmt.Sprintf("service %s restart", serviceName)
+	}
+
+	if reloadCmd != "" {
+		_, _ = Exec(reloadCmd)
+	}
+	_, _ = Exec(restartCmd)
 }
