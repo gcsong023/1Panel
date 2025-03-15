@@ -152,8 +152,8 @@ func (u *UpgradeService) Upgrade(req dto.Upgrade) error {
 			u.handleRollback(originalDir, 2)
 			return
 		}
-
-		if err := common.CopyFile(path.Join(tmpDir, "1panel.service"), "/etc/systemd/system"); err != nil {
+		serviceName, serviceFile, serviceDir := cmd.DetectServiceConfig()
+		if err := common.CopyFile(path.Join(tmpDir, serviceFile), serviceDir); err != nil {
 			global.LOG.Errorf("upgrade 1panel.service failed, err: %v", err)
 			u.handleRollback(originalDir, 3)
 			return
@@ -164,7 +164,7 @@ func (u *UpgradeService) Upgrade(req dto.Upgrade) error {
 		_ = settingRepo.Update("SystemVersion", req.Version)
 		_ = settingRepo.Update("SystemStatus", "Free")
 		checkPointOfWal()
-		_, _ = cmd.ExecWithTimeOut("systemctl daemon-reload && systemctl restart 1panel.service", 1*time.Minute)
+		cmd.Restart1PanelService(serviceName)
 	}()
 	return nil
 }
@@ -176,7 +176,8 @@ func (u *UpgradeService) handleBackup(fileOp files.FileOp, originalDir string) e
 	if err := fileOp.Copy("/usr/local/bin/1pctl", originalDir); err != nil {
 		return err
 	}
-	if err := fileOp.Copy("/etc/systemd/system/1panel.service", originalDir); err != nil {
+	_, serviceFile, serviceDir := cmd.DetectServiceConfig()
+	if err := fileOp.Copy(path.Join(serviceDir, serviceFile), originalDir); err != nil {
 		return err
 	}
 	_, _ = cmd.Execf("cp -r /usr/local/bin/lang %s", originalDir)
@@ -218,7 +219,8 @@ func (u *UpgradeService) handleRollback(originalDir string, errStep int) {
 	if errStep == 2 {
 		return
 	}
-	if err := common.CopyFile(path.Join(originalDir, "1panel.service"), "/etc/systemd/system"); err != nil {
+	_, serviceFile, serviceDir := cmd.DetectServiceConfig()
+	if err := common.CopyFile(path.Join(originalDir, serviceFile), serviceDir); err != nil {
 		global.LOG.Errorf("rollback 1panel failed, err: %v", err)
 	}
 }
