@@ -142,46 +142,114 @@ func initLocalFile() error {
 		return err
 	}
 	defer f.Close()
-	initFile := `#DEFAULT-START
+	initFile := `# DEFAULT-START
 [DEFAULT]
 bantime = 600
 findtime = 300
 maxretry = 5
 banaction = $banaction
 action = %(action_mwl)s
+backend = auto
+
+# Alpine-specific settings
+chain = INPUT
+port = 0:65535
+protocol = tcp
+enabled = true
+mode = aggressive
+
 #DEFAULT-END
 
 [sshd]
-ignoreip = 127.0.0.1/8
+ignoreip = 127.0.0.1/8 ::1
 enabled = true
 filter = sshd
-port = 22
+port = $ssh_port
 maxretry = 5
 findtime = 300
 bantime = 600
 banaction = $banaction
 action = %(action_mwl)s
-logpath = $logpath`
+logpath = $logpath
+maxmatches = 3
 
-	banaction := ""
-	if active, _ := systemctl.IsActive("firewalld"); active {
-		banaction = "firewallcmd-ipset"
-	} else if active, _ := systemctl.IsActive("ufw"); active {
-		banaction = "ufw"
-	} else {
-		banaction = "iptables-allports"
-	}
+[alpine-pam]
+enabled = false
+`
+	// 检测防火墙类型
+	banaction := detectFirewall()
+
+	// 检测SSH端口（支持Alpine的sshd_config位置）
+	sshPort := detectSSHPort()
+
+	// 检测日志路径（兼容Alpine的多种日志位置）
+	logPath := detectAuthLogPath()
+
+	// 执行变量替换
 	initFile = strings.ReplaceAll(initFile, "$banaction", banaction)
-
-	logPath := ""
-	if _, err := os.Stat("/var/log/secure"); err == nil {
-		logPath = "/var/log/secure"
-	} else {
-		logPath = "/var/log/auth.log"
-	}
 	initFile = strings.ReplaceAll(initFile, "$logpath", logPath)
+	initFile = strings.ReplaceAll(initFile, "$ssh_port", sshPort)
+
 	if err := os.WriteFile(defaultPath, []byte(initFile), 0640); err != nil {
 		return err
 	}
 	return nil
+}
+
+func detectFirewall() string {
+	if active, _ := systemctl.IsActive("firewalld"); active {
+		return "firewallcmd-ipset"
+	}
+	if active, _ := systemctl.IsActive("ufw"); active {
+		return "ufw"
+	}
+	if active, _ := systemctl.IsActive("iptables"); active {
+		return "iptables-allports"
+	}
+	if active, _ := systemctl.IsActive("nftables"); active {
+		return "nftables-allports"
+	}
+	return "iptables-allports"
+}
+
+func detectAuthLogPath() string {
+	paths := []string{
+		"/var/log/auth.log", // 常见默认路径
+		"/var/log/messages", // Alpine系统日志
+		"/var/log/secure",   // RHEL风格路径
+		"/var/log/syslog",   // Debian风格路径
+	}
+
+	for _, path := range paths {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return "/var/log/auth.log" // Alpine最终回退路径
+}
+
+func detectSSHPort() string {
+	// 检查标准sshd_config路径
+	configPaths := []string{
+		"/etc/ssh/sshd_config",
+		"/etc/sshd_config",
+	}
+
+	for _, path := range configPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "Port") {
+				parts := strings.Fields(line)
+				if len(parts) >= 2 {
+					return parts[1]
+				}
+			}
+		}
+	}
+	return "22" // 默认SSH端口
 }
