@@ -225,7 +225,7 @@ func detectAuthLogPath() string {
 			return path
 		}
 	}
-	return "/var/log/auth.log" // Alpine最终回退路径
+	return "/var/log/auth.log" // 常用路径兜底
 }
 
 func detectSSHPort() string {
